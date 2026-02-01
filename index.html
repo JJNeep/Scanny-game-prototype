@@ -46,10 +46,14 @@
         <button id="btn-flee" style="background: #555; color: #fff; margin-top: 10px;">RUN AWAY</button>
     </div>
 
-    <script>    // --- GAME STATE ---
+    <script> 
+            // --- GAME STATE ---
     const player = { maxHp: 100, hp: 100, atk: 15 };
     let enemy = { name: "", maxHp: 0, hp: 0, atk: 0 };
     
+    // Custom "Seed" for our random numbers
+    let currentSeed = 0; 
+
     const logEl = document.getElementById('log');
     const lobbyScreen = document.getElementById('screen-lobby');
     const battleScreen = document.getElementById('screen-battle');
@@ -60,74 +64,88 @@
         logEl.scrollTop = logEl.scrollHeight;
     }
 
-    // --- ROBUST NFC LOGIC ---
+    // --- 1. THE "REAL" RANDOM NUMBER GENERATOR ---
+    // This function replaces Math.random(). 
+    // It creates "random" numbers based purely on the card's ID.
+    function cardRandom() {
+        // Simple mathematical formula (Linear Congruential Generator)
+        currentSeed = (currentSeed * 9301 + 49297) % 233280;
+        return currentSeed / 233280;
+    }
+
+    // --- 2. NFC LOGIC ---
     document.getElementById('btn-scan').addEventListener('click', async () => {
-        log("Initializing NFC Reader...");
+        log("Initializing Scanner...");
         
         if (!("NDEFReader" in window)) {
-            log("❌ Error: Web NFC not supported on this device/browser. Try Chrome on Android.");
+            log("❌ Error: Use Chrome on Android.");
             return;
         }
 
         try {
             const ndef = new NDEFReader();
-            
-            // We start scanning
             await ndef.scan();
-            log("✅ Scanner Active! Hold T-Union card to back of phone.");
+            log("✅ Scanner Active! Tap card now.");
             
-            // ERROR HANDLING: If the read fails (common with encrypted cards)
+            // If the card is encrypted/unreadable, we FAIL. No faking.
             ndef.onreadingerror = () => {
-                log("⚠️ Card detected but data is encrypted."); 
-                log("Attempting to bypass...");
-                // Even if it errors on data, we might have caught it. 
-                // Unfortunately, Web NFC is strict. 
-                // If this happens, try the 'Generative' fallback below.
+                log("⚠️ READ ERROR: Signal blocked. Move card and try again."); 
             };
 
-            // SUCCESSFUL DETECT
+            // If we get a signal, we use the Serial Number.
             ndef.onreading = event => {
                 const serial = event.serialNumber;
+                
                 if (!serial) {
-                    log("⚠️ Card read, but no ID found.");
+                    log("⚠️ Ghost Signal: Card detected but no ID found.");
                     return;
                 }
-                log(`⚡ TAG LOCKED: ${serial}`);
-                generateEnemy(serial);
+                
+                log(`⚡ DATA CAPTURED: [${serial}]`);
+                generateEnemyFromRealData(serial);
             };
 
         } catch (error) {
-            log("❌ Permission/System Error: " + error);
+            log("❌ System Error: " + error);
         }
     });
 
-    // --- ENEMY GENERATION ---
-    function generateEnemy(serial) {
-        // Convert Serial (e.g. "04:5a:21") to a Math Seed
+    // --- 3. GENERATION FROM SERIAL ---
+    function generateEnemyFromRealData(serial) {
+        // STEP 1: Turn the Serial String (e.g. "04:5a:21") into a Number
         let hash = 0;
-        // If serial is empty (some bus cards hide it), generate a random one for now
-        if(serial === "") {
-             hash = Math.floor(Math.random() * 10000);
-             log("⚠️ Privacy Shield detected. Simulating ID.");
-        } else {
-            for (let i = 0; i < serial.length; i++) {
-                hash += serial.charCodeAt(i);
-            }
+        for (let i = 0; i < serial.length; i++) {
+            hash = ((hash << 5) - hash) + serial.charCodeAt(i);
+            hash |= 0; // Convert to 32bit integer
         }
+        
+        // STEP 2: Set the Seed
+        currentSeed = Math.abs(hash);
 
-        enemy.maxHp = (hash % 10) * 10 + 50; 
-        enemy.atk = (hash % 8) + 5;          
+        // STEP 3: Generate Stats using ONLY the card's seed
+        // We use cardRandom() instead of Math.random()
+        
+        // HP between 50 and 200
+        enemy.maxHp = Math.floor(cardRandom() * 150) + 50;
         enemy.hp = enemy.maxHp;
+        
+        // ATK between 5 and 25
+        enemy.atk = Math.floor(cardRandom() * 20) + 5;
 
-        const prefixes = ["Transit", "Metro", "Union", "Rapid", "City"];
-        const types = ["Construct", "Sentinel", "Ghost", "Warden", "Beast"];
-        enemy.name = prefixes[hash % prefixes.length] + " " + types[hash % types.length];
+        // Name Generation (Consistent for this card)
+        const prefixes = ["Void", "Mecha", "Cyber", "Pyro", "Cryo", "Neon", "Dark", "Holy"];
+        const types = ["Stalker", "Tank", "Drone", "Soldier", "Beast", "Spirit", "Glitch"];
+        
+        const pIndex = Math.floor(cardRandom() * prefixes.length);
+        const tIndex = Math.floor(cardRandom() * types.length);
+        
+        enemy.name = `${prefixes[pIndex]} ${types[tIndex]} (ID:${serial.slice(-4)})`;
 
-        // Slight delay so user sees the "Lock"
-        setTimeout(startBattle, 1000);
+        // Start Battle
+        setTimeout(startBattle, 800);
     }
 
-    // --- BATTLE LOGIC (Same as before) ---
+    // --- BATTLE LOGIC ---
     function startBattle() {
         lobbyScreen.classList.add('hidden');
         battleScreen.classList.remove('hidden');
@@ -135,10 +153,12 @@
     }
 
     document.getElementById('btn-attack').addEventListener('click', () => {
+        // Player Attack (Still uses normal random luck)
         const pDmg = Math.floor(Math.random() * 5) + player.atk;
         enemy.hp -= pDmg;
         if (enemy.hp <= 0) return winBattle();
 
+        // Enemy Attack (Uses normal random luck for damage variance)
         const eDmg = Math.floor(Math.random() * 5) + enemy.atk;
         player.hp -= eDmg;
         if (player.hp <= 0) return loseBattle();
@@ -160,12 +180,12 @@
     }
 
     function winBattle() {
-        alert(`VICTORY! ${enemy.name} defeated.`);
+        alert(`TARGET ELIMINATED.\nData harvested.`);
         resetGame();
     }
 
     function loseBattle() {
-        alert("DEFEAT.");
+        alert("CRITICAL FAILURE.");
         player.hp = 100; 
         resetGame();
     }
@@ -173,7 +193,7 @@
     function resetGame() {
         battleScreen.classList.add('hidden');
         lobbyScreen.classList.remove('hidden');
-        log("Ready.");
+        log("Scanner reset. Waiting for input.");
     }
         
     </script>
