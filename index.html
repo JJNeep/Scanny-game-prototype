@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NFC Battler Prototype</title>
+    <style>
+        body { font-family: 'Courier New', monospace; background: #222; color: #0f0; padding: 20px; text-align: center; }
+        h1 { font-size: 1.5rem; border-bottom: 1px solid #0f0; padding-bottom: 10px; }
+        .box { border: 2px solid #0f0; padding: 20px; margin-top: 20px; border-radius: 8px; }
+        button { background: #0f0; color: #000; border: none; padding: 15px 30px; font-size: 1.2rem; font-weight: bold; cursor: pointer; margin-top: 10px; width: 100%; }
+        button:disabled { background: #555; color: #888; }
+        #log { margin-top: 20px; font-size: 0.9rem; color: #aaa; text-align: left; height: 100px; overflow-y: scroll; border: 1px solid #444; padding: 5px; }
+        .hidden { display: none; }
+        .stat-bar { height: 10px; background: #444; margin: 5px 0; width: 100%; }
+        .fill { height: 100%; background: #0f0; transition: width 0.3s; }
+        .enemy-name { font-size: 1.5rem; font-weight: bold; color: #f55; }
+    </style>
+</head>
+<body>
+
+    <h1>NFC SKIRMISH</h1>
+
+    <div id="screen-lobby">
+        <p>Scan an object to summon an enemy based on its digital soul.</p>
+        <button id="btn-scan">SCAN NFC TAG</button>
+        <div id="log">System Ready...</div>
+    </div>
+
+    <div id="screen-battle" class="hidden">
+        <div class="box" style="border-color: #f55;">
+            <div class="enemy-name" id="enemy-name">UNKNOWN</div>
+            <div class="stat-bar"><div id="enemy-hp-bar" class="fill" style="background: #f55;"></div></div>
+            <p>HP: <span id="enemy-hp">0</span> / <span id="enemy-max-hp">0</span></p>
+            <p>ATK: <span id="enemy-atk">0</span></p>
+        </div>
+
+        <div style="font-size: 2rem; margin: 10px;">VS</div>
+
+        <div class="box">
+            <div>PLAYER</div>
+            <div class="stat-bar"><div id="player-hp-bar" class="fill"></div></div>
+            <p>HP: <span id="player-hp">100</span> / 100</p>
+        </div>
+
+        <button id="btn-attack">ATTACK!</button>
+        <button id="btn-flee" style="background: #555; color: #fff; margin-top: 10px;">RUN AWAY</button>
+    </div>
+
+    <script>
+        // --- GAME STATE ---
+        const player = { maxHp: 100, hp: 100, atk: 15 };
+        let enemy = { name: "", maxHp: 0, hp: 0, atk: 0 };
+        
+        const logEl = document.getElementById('log');
+        const lobbyScreen = document.getElementById('screen-lobby');
+        const battleScreen = document.getElementById('screen-battle');
+
+        // --- UTILITIES ---
+        function log(msg) {
+            logEl.innerHTML += `> ${msg}<br>`;
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+
+        // --- NFC LOGIC ---
+        document.getElementById('btn-scan').addEventListener('click', async () => {
+            log("Requesting NFC...");
+            try {
+                const ndef = new NDEFReader();
+                await ndef.scan();
+                log("Scanning! Tap a tag now.");
+                
+                ndef.onreading = event => {
+                    const serial = event.serialNumber;
+                    log(`Tag Found: ${serial}`);
+                    generateEnemy(serial);
+                };
+            } catch (error) {
+                log("Error: " + error);
+                if (error.name === 'ReferenceError') {
+                    log("Web NFC not supported on this device/browser.");
+                }
+            }
+        });
+
+        // --- ENEMY GENERATION (The "Magic" Part) ---
+        function generateEnemy(serial) {
+            // We turn the serial number (e.g., "04:5a:21") into numbers
+            // This ensures the same tag ALWAYS creates the same enemy.
+            let hash = 0;
+            for (let i = 0; i < serial.length; i++) {
+                hash += serial.charCodeAt(i);
+            }
+
+            // Procedural Stats based on the hash
+            enemy.maxHp = (hash % 10) * 10 + 50; // HP between 50 and 140
+            enemy.atk = (hash % 8) + 5;          // Atk between 5 and 12
+            enemy.hp = enemy.maxHp;
+
+            // Procedural Names
+            const prefixes = ["Cyber", "Neon", "Rusty", "Glitch", "Shadow"];
+            const types = ["Drone", "Beast", "Soldier", "Virus", "Golem"];
+            enemy.name = prefixes[hash % prefixes.length] + " " + types[hash % types.length];
+
+            startBattle();
+        }
+
+        // --- BATTLE LOGIC ---
+        function startBattle() {
+            lobbyScreen.classList.add('hidden');
+            battleScreen.classList.remove('hidden');
+            updateUI();
+        }
+
+        document.getElementById('btn-attack').addEventListener('click', () => {
+            // Player hits Enemy
+            const pDmg = Math.floor(Math.random() * 5) + player.atk;
+            enemy.hp -= pDmg;
+            if (enemy.hp <= 0) return winBattle();
+
+            // Enemy hits Player
+            const eDmg = Math.floor(Math.random() * 5) + enemy.atk;
+            player.hp -= eDmg;
+            if (player.hp <= 0) return loseBattle();
+
+            updateUI();
+        });
+
+        document.getElementById('btn-flee').addEventListener('click', resetGame);
+
+        function updateUI() {
+            document.getElementById('enemy-name').innerText = enemy.name;
+            document.getElementById('enemy-hp').innerText = Math.max(0, enemy.hp);
+            document.getElementById('enemy-max-hp').innerText = enemy.maxHp;
+            document.getElementById('enemy-atk').innerText = enemy.atk;
+            document.getElementById('enemy-hp-bar').style.width = (enemy.hp / enemy.maxHp * 100) + "%";
+
+            document.getElementById('player-hp').innerText = Math.max(0, player.hp);
+            document.getElementById('player-hp-bar').style.width = (player.hp / player.maxHp * 100) + "%";
+        }
+
+        function winBattle() {
+            alert(`VICTORY! You defeated ${enemy.name}`);
+            resetGame();
+        }
+
+        function loseBattle() {
+            alert("DEFEAT... Systems critical.");
+            player.hp = 100; // Mercy heal
+            resetGame();
+        }
+
+        function resetGame() {
+            battleScreen.classList.add('hidden');
+            lobbyScreen.classList.remove('hidden');
+            log("Ready to scan next target.");
+        }
+    </script>
+</body>
+</html>
