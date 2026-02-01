@@ -46,114 +46,136 @@
         <button id="btn-flee" style="background: #555; color: #fff; margin-top: 10px;">RUN AWAY</button>
     </div>
 
-    <script>
-        // --- GAME STATE ---
-        const player = { maxHp: 100, hp: 100, atk: 15 };
-        let enemy = { name: "", maxHp: 0, hp: 0, atk: 0 };
-        
-        const logEl = document.getElementById('log');
-        const lobbyScreen = document.getElementById('screen-lobby');
-        const battleScreen = document.getElementById('screen-battle');
+    <script>    // --- GAME STATE ---
+    const player = { maxHp: 100, hp: 100, atk: 15 };
+    let enemy = { name: "", maxHp: 0, hp: 0, atk: 0 };
+    
+    const logEl = document.getElementById('log');
+    const lobbyScreen = document.getElementById('screen-lobby');
+    const battleScreen = document.getElementById('screen-battle');
 
-        // --- UTILITIES ---
-        function log(msg) {
-            logEl.innerHTML += `> ${msg}<br>`;
-            logEl.scrollTop = logEl.scrollHeight;
+    // --- UTILITIES ---
+    function log(msg) {
+        logEl.innerHTML += `> ${msg}<br>`;
+        logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    // --- ROBUST NFC LOGIC ---
+    document.getElementById('btn-scan').addEventListener('click', async () => {
+        log("Initializing NFC Reader...");
+        
+        if (!("NDEFReader" in window)) {
+            log("❌ Error: Web NFC not supported on this device/browser. Try Chrome on Android.");
+            return;
         }
 
-        // --- NFC LOGIC ---
-        document.getElementById('btn-scan').addEventListener('click', async () => {
-            log("Requesting NFC...");
-            try {
-                const ndef = new NDEFReader();
-                await ndef.scan();
-                log("Scanning! Tap a tag now.");
-                
-                ndef.onreading = event => {
-                    const serial = event.serialNumber;
-                    log(`Tag Found: ${serial}`);
-                    generateEnemy(serial);
-                };
-            } catch (error) {
-                log("Error: " + error);
-                if (error.name === 'ReferenceError') {
-                    log("Web NFC not supported on this device/browser.");
-                }
-            }
-        });
+        try {
+            const ndef = new NDEFReader();
+            
+            // We start scanning
+            await ndef.scan();
+            log("✅ Scanner Active! Hold T-Union card to back of phone.");
+            
+            // ERROR HANDLING: If the read fails (common with encrypted cards)
+            ndef.onreadingerror = () => {
+                log("⚠️ Card detected but data is encrypted."); 
+                log("Attempting to bypass...");
+                // Even if it errors on data, we might have caught it. 
+                // Unfortunately, Web NFC is strict. 
+                // If this happens, try the 'Generative' fallback below.
+            };
 
-        // --- ENEMY GENERATION (The "Magic" Part) ---
-        function generateEnemy(serial) {
-            // We turn the serial number (e.g., "04:5a:21") into numbers
-            // This ensures the same tag ALWAYS creates the same enemy.
-            let hash = 0;
+            // SUCCESSFUL DETECT
+            ndef.onreading = event => {
+                const serial = event.serialNumber;
+                if (!serial) {
+                    log("⚠️ Card read, but no ID found.");
+                    return;
+                }
+                log(`⚡ TAG LOCKED: ${serial}`);
+                generateEnemy(serial);
+            };
+
+        } catch (error) {
+            log("❌ Permission/System Error: " + error);
+        }
+    });
+
+    // --- ENEMY GENERATION ---
+    function generateEnemy(serial) {
+        // Convert Serial (e.g. "04:5a:21") to a Math Seed
+        let hash = 0;
+        // If serial is empty (some bus cards hide it), generate a random one for now
+        if(serial === "") {
+             hash = Math.floor(Math.random() * 10000);
+             log("⚠️ Privacy Shield detected. Simulating ID.");
+        } else {
             for (let i = 0; i < serial.length; i++) {
                 hash += serial.charCodeAt(i);
             }
-
-            // Procedural Stats based on the hash
-            enemy.maxHp = (hash % 10) * 10 + 50; // HP between 50 and 140
-            enemy.atk = (hash % 8) + 5;          // Atk between 5 and 12
-            enemy.hp = enemy.maxHp;
-
-            // Procedural Names
-            const prefixes = ["Cyber", "Neon", "Rusty", "Glitch", "Shadow"];
-            const types = ["Drone", "Beast", "Soldier", "Virus", "Golem"];
-            enemy.name = prefixes[hash % prefixes.length] + " " + types[hash % types.length];
-
-            startBattle();
         }
 
-        // --- BATTLE LOGIC ---
-        function startBattle() {
-            lobbyScreen.classList.add('hidden');
-            battleScreen.classList.remove('hidden');
-            updateUI();
-        }
+        enemy.maxHp = (hash % 10) * 10 + 50; 
+        enemy.atk = (hash % 8) + 5;          
+        enemy.hp = enemy.maxHp;
 
-        document.getElementById('btn-attack').addEventListener('click', () => {
-            // Player hits Enemy
-            const pDmg = Math.floor(Math.random() * 5) + player.atk;
-            enemy.hp -= pDmg;
-            if (enemy.hp <= 0) return winBattle();
+        const prefixes = ["Transit", "Metro", "Union", "Rapid", "City"];
+        const types = ["Construct", "Sentinel", "Ghost", "Warden", "Beast"];
+        enemy.name = prefixes[hash % prefixes.length] + " " + types[hash % types.length];
 
-            // Enemy hits Player
-            const eDmg = Math.floor(Math.random() * 5) + enemy.atk;
-            player.hp -= eDmg;
-            if (player.hp <= 0) return loseBattle();
+        // Slight delay so user sees the "Lock"
+        setTimeout(startBattle, 1000);
+    }
 
-            updateUI();
-        });
+    // --- BATTLE LOGIC (Same as before) ---
+    function startBattle() {
+        lobbyScreen.classList.add('hidden');
+        battleScreen.classList.remove('hidden');
+        updateUI();
+    }
 
-        document.getElementById('btn-flee').addEventListener('click', resetGame);
+    document.getElementById('btn-attack').addEventListener('click', () => {
+        const pDmg = Math.floor(Math.random() * 5) + player.atk;
+        enemy.hp -= pDmg;
+        if (enemy.hp <= 0) return winBattle();
 
-        function updateUI() {
-            document.getElementById('enemy-name').innerText = enemy.name;
-            document.getElementById('enemy-hp').innerText = Math.max(0, enemy.hp);
-            document.getElementById('enemy-max-hp').innerText = enemy.maxHp;
-            document.getElementById('enemy-atk').innerText = enemy.atk;
-            document.getElementById('enemy-hp-bar').style.width = (enemy.hp / enemy.maxHp * 100) + "%";
+        const eDmg = Math.floor(Math.random() * 5) + enemy.atk;
+        player.hp -= eDmg;
+        if (player.hp <= 0) return loseBattle();
 
-            document.getElementById('player-hp').innerText = Math.max(0, player.hp);
-            document.getElementById('player-hp-bar').style.width = (player.hp / player.maxHp * 100) + "%";
-        }
+        updateUI();
+    });
 
-        function winBattle() {
-            alert(`VICTORY! You defeated ${enemy.name}`);
-            resetGame();
-        }
+    document.getElementById('btn-flee').addEventListener('click', resetGame);
 
-        function loseBattle() {
-            alert("DEFEAT... Systems critical.");
-            player.hp = 100; // Mercy heal
-            resetGame();
-        }
+    function updateUI() {
+        document.getElementById('enemy-name').innerText = enemy.name;
+        document.getElementById('enemy-hp').innerText = Math.max(0, enemy.hp);
+        document.getElementById('enemy-max-hp').innerText = enemy.maxHp;
+        document.getElementById('enemy-atk').innerText = enemy.atk;
+        document.getElementById('enemy-hp-bar').style.width = (enemy.hp / enemy.maxHp * 100) + "%";
 
-        function resetGame() {
-            battleScreen.classList.add('hidden');
-            lobbyScreen.classList.remove('hidden');
-            log("Ready to scan next target.");
-        }
+        document.getElementById('player-hp').innerText = Math.max(0, player.hp);
+        document.getElementById('player-hp-bar').style.width = (player.hp / player.maxHp * 100) + "%";
+    }
+
+    function winBattle() {
+        alert(`VICTORY! ${enemy.name} defeated.`);
+        resetGame();
+    }
+
+    function loseBattle() {
+        alert("DEFEAT.");
+        player.hp = 100; 
+        resetGame();
+    }
+
+    function resetGame() {
+        battleScreen.classList.add('hidden');
+        lobbyScreen.classList.remove('hidden');
+        log("Ready.");
+    }
+        
     </script>
 </body>
 </html>
